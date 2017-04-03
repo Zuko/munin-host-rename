@@ -1,166 +1,186 @@
 #!/usr/bin/env bash
+# (c) 2017, Zuko
 # (c) 2011, Stefan Schlesinger, sts@ono.at
 #
 # munin-host-rename - Rename a host in munin.
 #
-#
-# Usage:
-#
-# munin-host-rename <Hostgroup> <Old-Hostname> <New-Hostname>
-
-
+# Checked with shellcheck version: 0.4.4
 
 # Configuration
-RRD=/var/lib/munin
-HTML=/var/www/munin
-BACKUP=/var/tmp/munin
+RRD="/var/lib/munin"
+BACKUP="/var/tmp/munin"
 
+function usageText {
+	echo -e "$(basename "$0") usage:"
+	echo ""
+	echo -e "\t-og\t[ --old-group ]\t\t- Old Host Group"
+	echo -e "\t-ng\t[ --new-group ]\t\t- New Host Group (Optional)"
+	echo -e "\t-oh\t[ --old-host ]\t\t- Old Host Name"
+	echo -e "\t-nh\t[ --new-host ]\t\t- New Host Name"
+	echo -e "\t-bd\t[ --backup-dir ]\t- Backup Dir (Optional)"
+	echo -e "\t-rd\t[ --rdd-dir ]\t\t- RRD Dir (optional)"
+	echo -e "\t-h\t[ --help ]\t\t- This ;-)"
+}
 
-
-
-########## COMMAND LINE ARGUMENTS
-GROUP=$1 ; HOST=$2 ; HOSTNEW=$3
-
-if [ $# -ne  3 ]; then
-    echo "Usage: $0 <Hostgroup> <Old-Hostname> <New-Hostname>"
-    echo "munin-host-rename - Rename a munin host."
-    echo "You need sudo privileges and should disable munin-cron."
-    exit 100
+if [ $# -gt "0" ]; then
+	while [ -n "$1" ]; do
+		case $1 in
+			-og|--old-group)
+				if [ -n "$2" ]; then
+					_OG="$2"
+					shift
+				else
+					echo "\"$1\" can't be empty!"
+					exit 1
+				fi ;;
+			-ng|--new-group)
+				if [ -n "$2" ]; then
+					_NG="$2"
+					shift
+				else
+					echo "\"$1\" can't be empty!"
+					exit 1
+				fi ;;
+			-oh|--old-host)
+				if [ -n "$2" ]; then
+					_OH="$2"
+					shift
+				else
+					echo "\"$1\" can't be empty!"
+					exit 1
+				fi ;;
+			-nh|--new-host)
+				if [ -n "$2" ]; then
+					_NH="$2"
+					shift
+				else
+					echo "\"$1\" can't be empty!"
+					exit 1
+				fi ;;
+			-bd|--backup-dir)
+				if [ -n "$2" ]; then
+					_BACKUPDIR="$2"
+					shift
+				fi ;;
+			-rd|--rdd-dir)
+				if [ -n "$2" ]; then
+					_RRDDIR="$2"
+					shift
+				fi ;;
+			*|-h|--help)
+				usageText; exit ;;
+		esac
+		shift
+	done
+else
+	usageText; exit
 fi
 
 ########## DIRECTORIES
-RRDDIR="${RRD}/${GROUP}"
-HTMLDIR="${HTML}/${GROUP}"
-BACKDIR="${BACKUP}/${GROUP}/${HOST}"
-
-
-
+_RRDDIR="${RRD}/${_OG}"
+_BACKUPDIR="${BACKUP}/${_OG}/${_OH}"
 
 ########## FUNCTIONS
 prompt_user() {
-read safetypin
-if [ "$safetypin" != "y" ]; then
-        echo '>>>> ABORTING MUNIN HOST RENAME, AT YOUR DISCRETION!'
-        exit 3
-fi
+	# WTF?
+	#shellcheck disable=SC2162,SC2034
+	read -e -p "Is that correct? (y/N): " -i "N"
+	if ! [[ ${REPLY} =~ ^(yes|y|t)$ ]]; then
+		echo '>>>> ABORTING MUNIN HOST RENAME, AT YOUR DISCRETION!'
+		exit 3
+	fi
 }
 
 check_rc() {
-RC=$?
-if [ $RC -ne 0 ]; then
-        echo "Failed: $1"
-        echo "RC was $RC. Bailing out"
-        exit 4
-fi
+	RC=$?
+	if [ ${RC} -ne 0 ]; then
+		echo "Failed: $1"
+		echo "RC was ${RC}. Bailing out"
+		exit 4
+	fi
 }
 
-
-
 ########## USER CONFIRMATION
-echo
+echo ""
 echo "MUNIN-HOST-RENAME --------------------------------------------------"
-echo
-echo " * RRD  Directory   : ${RRDDIR}"
-echo " * HTML Directory   : ${HTMLDIR}"
-echo " * BACKUP Directory : ${BACKDIR}"
-echo 
-echo " * Hostgroup    : ${GROUP}"
-echo " * Old-Hostname : ${HOST}"
-echo " * New-Hostname : ${HOSTNEW}"
-echo
-echo -n "Is that correct? (y/N) "
+echo ""
+echo " * RRD Directory   : ${_RRDDIR}"
+echo " * BACKUP Directory : ${_BACKUPDIR}"
+echo ""
+echo " * Old-Hostgroup	: ${_OG}"
+echo " * New-Hostgroup	: ${_NG}"
+echo " * Old-Hostname		: ${_OH}"
+echo " * New-Hostname		: ${_NH}"
+echo ""
 prompt_user
 
-
 ########## SANITY CHECKS
-
 # Suppose other distributions or systems might use other paths,
 # check this until more platforms are tested.
-if [ ! -e "/etc/debian_version" -a ! -e "/etc/redhat-release" ] ; then
-    echo "-- Warning --"
-    echo "You are running this script on an untested platform."
-    echo "Please check the configured directory paths."
-    exit 101
+if [ ! -e "/etc/debian_version" ] && [ ! -e "/etc/redhat-release" ]; then
+	echo "-- Warning --"
+	echo "You are running this script on an untested platform."
+	echo "Please check the configured directory paths."
+	exit 101
 fi
-
-# Should be run as a user, which is able to execute munin scripts
-# as munin user.
-if [ "`sudo -u munin echo`" ] ; then
-    echo 'Cannot execute command, need sudo privileges for user munin: sudo -u munin echo'
-    echo $?
-    exit 102
-fi
-
 
 # Check if all directories are writeable by the current user.
-if [ ! -w "${RRDDIR}"  ] ; then
-    echo "Cannot write to RRD-Directory: ${RRDDIR}"
-    exit 103
+if [ ! -w "${_RRDDIR}" ]; then
+	echo "Cannot write to RRD-Directory: ${_RRDDIR}"
+	exit 103
 fi
-
-if [ ! -w "${HTMLDIR}" ] ; then
-    echo "Cannot write to HTML-Directory: ${HTMLDIR}"
-    exit 104
-fi
-
 
 ###### BACKUP DIRECTORY
-if [ -e "$BACKDIR" ] ; then
-   echo "E1 - Backup directory already exits."
-   exit 105
+if [ -e "${_BACKUPDIR}" ]; then
+	echo "E1 - Backup directory already exits."
+	exit 105
 fi
 
-mkdir -p $BACKDIR
+mkdir -p "${_BACKUPDIR}"
 
-if [ ! -w $BACKDIR ] ; then
-    echo "Cannot write to BACKUP-Directory: ${BACKDIR}"
-    exit 106
+if [ ! -w "${_BACKUPDIR}" ]; then
+	echo "Cannot write to BACKUP-Directory: ${_BACKUPDIR}"
+	exit 106
 fi
-
-
 
 ###### BACKUP RRD
-echo "01 - Creating backup in ${BACKDIR}"
-
-for i in `find $RRDDIR -iname "${HOST}-*.rrd"` ; do
-    cp $i $BACKDIR
-    check_rc "E1 - Cannot create backup of file.\ncp ${i} ${BACKDIR}"
+echo "01 - Creating backup in ${_BACKUPDIR}"
+echo find "${_RRDDIR}" -name "${_OH}-*.rrd"
+for i in $(find "${_RRDDIR}" -name "${_OH}-*.rrd"); do
+	cp -a "${i}" "${_BACKUPDIR}"
+	check_rc "E1 - Cannot create backup of file.\ncp ${i} ${_BACKUPDIR}"
 done
-
-
 
 ###### RENAME
-echo "02 - Renaming rrd files in: ${RRDDIR}"
-for i in `find $RRDDIR -iname "${HOST}-*.rrd"` ; do
-    new=`echo ${i}|sed -e "s/${HOST}/${HOSTNEW}/"`
-    if [ -e $new ] ; then
-        echo "Error: Won't move rrd file, destination already exits: ${new}"
-        exit 107
-    fi
+echo "02 - Renaming rrd files in: ${_RRDDIR}"
+if [ -n "${_NG}" ]; then
+	if [ ! -d "${RRD}/${_NG}" ]; then
+		echo "Creating New Group Directory: \"${RRD}/${_NG}\""
+		mkdir -p "${RRD}/${_NG}"
+	fi
+else
+	echo "New Group (${_NG}) Directory Exists"
+fi
 
-    mv ${i} ${new}
-    check_rc "E2 - Cannot move ${i} to ${new}."
+echo find "${_RRDDIR}" -name "${_OH}-*.rrd"
+for i in $(find "${_RRDDIR}" -name "${_OH}-*.rrd"); do
+	if [ -z "${_NG}" ]; then
+		new="${i/${_OH}/${_NH}}"
+	else
+		new="${i/${_OH}/${_NH}}"
+		new="${new/${_OG}/${_NG}}"
+	fi
+
+	if [ -e "${new}" ]; then
+		echo "Error: Won't move rrd file, destination already exits: ${new}"
+		exit 107
+	fi
+
+	mv "${i}" "${new}"
+	check_rc "E2 - Cannot move \"${i}\" to \"${new}\"."
 done
-
-##### DELETE HTML+IMAGES
-echo "03 - Deleting old images and html files."
-for i in `find ${HTMLDIR} -regextype posix-egrep -regex "${HTMLDIR}/${HOST}-.*(html|png)"` ; do
-    rm ${i}
-    check_rc "E3 - Cannot delete $i."
-done
-
-##### RUN MUNIN-UPDATE, MUNIN-GRAH AND MUNIN-HTML AS MUNIN USER
-echo "04 - Running munin-graph for ${HOSTNEW}"
-sudo -u munin /usr/share/munin/munin-update
-check_rc "E4 - Cannot run munin-update as munin user (needs sudo privileges)."
-
-echo "05 - Running munin-graph"
-sudo -u munin /usr/share/munin/munin-graph --force --host ${HOSTNEW} --week --month --year
-check_rc "E5 - Cannot run munin-graph as munin user (needs sudo privileges)."
-
-echo "06 - Running munin-html"
-sudo -u munin /usr/share/munin/munin-html 
-check_rc "E6 - Cannot run munin-html as munin user (needs sudo privileges)."
 
 ###### SUCCESS
-echo "Successfully renamed the host. New hostname: ${HOSTNEW}"
+echo "Successfully renamed the host. New hostname: ${_NH}. Start your cron jobs!"
+
+# EOF
